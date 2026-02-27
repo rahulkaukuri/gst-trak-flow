@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { useGST } from '@/context/GSTContext';
+import { useAuth } from '@/context/AuthContext';
 import { BuyerClaim } from '@/types/gst';
 import { motion } from 'framer-motion';
 import { Button } from '@/components/ui/button';
@@ -9,14 +10,15 @@ import { Switch } from '@/components/ui/switch';
 import { Card } from '@/components/ui/card';
 import { ShoppingCart, Plus, DollarSign, ShieldAlert, ShieldCheck } from 'lucide-react';
 import StatCard from '@/components/StatCard';
-import RiskBadge from '@/components/RiskBadge';
+import { Badge } from '@/components/ui/badge';
 import RiskMeter from '@/components/RiskMeter';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
 
 export default function BuyerPage() {
   const { addClaim, claims, reconciliations } = useGST();
+  const { user } = useAuth();
   const [form, setForm] = useState({
-    buyerGstin: '',
+    buyerGstin: user?.gstin || '',
     sellerGstin: '',
     invoiceNumber: '',
     itcClaimedAmount: '',
@@ -38,10 +40,11 @@ export default function BuyerPage() {
     setForm(f => ({ ...f, sellerGstin: '', invoiceNumber: '', itcClaimedAmount: '', presentInGstr2b: true }));
   };
 
-  const totalClaimed = reconciliations.reduce((s, r) => s + (r.buyerClaim?.itcClaimedAmount || 0), 0);
-  const validITC = reconciliations.filter(r => r.itcStatus === 'VALID').reduce((s, r) => s + (r.buyerClaim?.itcClaimedAmount || 0), 0);
+  // Filter to buyer's own if GSTIN available
+  const myRecs = user?.gstin ? reconciliations.filter(r => r.buyerGstin === user.gstin) : reconciliations;
+  const totalClaimed = myRecs.reduce((s, r) => s + (r.buyerClaim?.itcClaimedAmount || 0), 0);
+  const validITC = myRecs.filter(r => r.itcStatus === 'VALID').reduce((s, r) => s + (r.buyerClaim?.itcClaimedAmount || 0), 0);
   const riskITC = totalClaimed - validITC;
-  const avgRisk = reconciliations.length > 0 ? Math.round(reconciliations.reduce((s, r) => s + r.riskScore, 0) / reconciliations.length) : 0;
 
   return (
     <div className="space-y-6">
@@ -51,18 +54,14 @@ export default function BuyerPage() {
         </div>
         <div>
           <h1 className="text-xl font-bold">Buyer Portal</h1>
-          <p className="text-sm text-muted-foreground">Claim ITC and track reconciliation status</p>
+          <p className="text-sm text-muted-foreground">Claim ITC and track invoice status</p>
         </div>
       </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
         <StatCard title="Total ITC Claimed" value={`₹${totalClaimed.toLocaleString()}`} icon={DollarSign} />
         <StatCard title="Valid ITC" value={`₹${validITC.toLocaleString()}`} icon={ShieldCheck} variant="success" />
         <StatCard title="ITC at Risk" value={`₹${riskITC.toLocaleString()}`} icon={ShieldAlert} variant={riskITC > 0 ? 'danger' : 'success'} />
-        <div className="stat-card">
-          <p className="text-xs text-muted-foreground uppercase tracking-wider font-medium mb-3">ITC Risk Score</p>
-          <RiskMeter score={avgRisk} size="lg" />
-        </div>
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
@@ -100,9 +99,9 @@ export default function BuyerPage() {
         </Card>
 
         <Card className="bg-card border-border p-6 overflow-auto">
-          <h2 className="text-lg font-semibold mb-4">Reconciliation Results</h2>
-          {reconciliations.length === 0 ? (
-            <p className="text-muted-foreground text-sm text-center py-10">No claims yet. Submit an ITC claim to see results.</p>
+          <h2 className="text-lg font-semibold mb-4">Invoice Status</h2>
+          {myRecs.length === 0 ? (
+            <p className="text-muted-foreground text-sm text-center py-10">No claims yet.</p>
           ) : (
             <table className="data-table">
               <thead>
@@ -110,44 +109,46 @@ export default function BuyerPage() {
                   <th>Invoice</th>
                   <th>Amount</th>
                   <th>Status</th>
-                  <th>Risk</th>
                   <th>Details</th>
                 </tr>
               </thead>
               <tbody>
-                {reconciliations.slice().reverse().map((rec, i) => (
+                {myRecs.slice().reverse().map((rec, i) => (
                   <motion.tr key={rec.id} initial={{ opacity: 0, x: -10 }} animate={{ opacity: 1, x: 0 }} transition={{ delay: i * 0.05 }}>
                     <td className="text-foreground">{rec.invoiceNumber}</td>
                     <td>₹{rec.buyerClaim?.itcClaimedAmount.toLocaleString()}</td>
-                    <td><RiskBadge level={rec.riskLevel} /></td>
-                    <td className="font-mono text-xs">{rec.riskScore}</td>
+                    <td>
+                      <Badge variant="outline" className={
+                        rec.itcStatus === 'VALID'
+                          ? 'bg-primary/15 text-primary border-primary/30 text-xs'
+                          : rec.itcStatus === 'AT_RISK'
+                            ? 'bg-warning/15 text-warning border-warning/30 text-xs'
+                            : 'bg-destructive/15 text-destructive border-destructive/30 text-xs'
+                      }>
+                        {rec.itcStatus}
+                      </Badge>
+                    </td>
                     <td>
                       <Dialog>
                         <DialogTrigger asChild>
-                          <Button variant="ghost" size="sm" className="text-xs text-accent">Audit</Button>
+                          <Button variant="ghost" size="sm" className="text-xs text-accent">View</Button>
                         </DialogTrigger>
                         <DialogContent className="max-w-lg">
                           <DialogHeader>
-                            <DialogTitle className="flex items-center gap-2">
-                              Audit Trail — {rec.invoiceNumber}
-                              <RiskBadge level={rec.riskLevel} />
-                            </DialogTitle>
+                            <DialogTitle>Invoice {rec.invoiceNumber}</DialogTitle>
                           </DialogHeader>
-                          <div className="space-y-4">
-                            <RiskMeter score={rec.riskScore} size="lg" />
+                          <div className="space-y-3">
                             <div>
-                              <p className="text-xs text-muted-foreground uppercase tracking-wider mb-1">Root Cause</p>
-                              <p className="text-sm font-medium">{rec.rootCause}</p>
+                              <p className="text-xs text-muted-foreground uppercase tracking-wider mb-1">Status</p>
+                              <p className="text-sm font-medium">{rec.itcStatus}</p>
                             </div>
                             <div>
-                              <p className="text-xs text-muted-foreground uppercase tracking-wider mb-1">Explanation</p>
+                              <p className="text-xs text-muted-foreground uppercase tracking-wider mb-1">Details</p>
                               <p className="text-sm leading-relaxed">{rec.explanation}</p>
                             </div>
                             <div className="grid grid-cols-2 gap-3 text-xs font-mono">
                               <div><span className="text-muted-foreground">Seller:</span> {rec.sellerGstin}</div>
                               <div><span className="text-muted-foreground">Buyer:</span> {rec.buyerGstin}</div>
-                              <div><span className="text-muted-foreground">ITC Status:</span> {rec.itcStatus}</div>
-                              <div><span className="text-muted-foreground">Risk Score:</span> {rec.riskScore}/100</div>
                             </div>
                           </div>
                         </DialogContent>
