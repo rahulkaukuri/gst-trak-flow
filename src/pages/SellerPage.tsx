@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { useGST } from '@/context/GSTContext';
+import { useAuth } from '@/context/AuthContext';
 import { SellerInvoice } from '@/types/gst';
 import { motion } from 'framer-motion';
 import { Button } from '@/components/ui/button';
@@ -9,13 +10,13 @@ import { Switch } from '@/components/ui/switch';
 import { Card } from '@/components/ui/card';
 import { FileText, Plus, CheckCircle2, AlertTriangle } from 'lucide-react';
 import StatCard from '@/components/StatCard';
-import RiskBadge from '@/components/RiskBadge';
-import RiskMeter from '@/components/RiskMeter';
+import { Badge } from '@/components/ui/badge';
 
 export default function SellerPage() {
-  const { addInvoice, invoices, reconciliations } = useGST();
+  const { addInvoice, invoices } = useGST();
+  const { user } = useAuth();
   const [form, setForm] = useState({
-    sellerGstin: '',
+    sellerGstin: user?.gstin || '',
     buyerGstin: '',
     invoiceNumber: '',
     invoiceDate: '',
@@ -51,8 +52,8 @@ export default function SellerPage() {
     };
 
     addInvoice(invoice);
-    setForm({
-      sellerGstin: form.sellerGstin,
+    setForm(f => ({
+      ...f,
       buyerGstin: '',
       invoiceNumber: '',
       invoiceDate: '',
@@ -63,15 +64,15 @@ export default function SellerPage() {
       gstr1Filed: true,
       gstr3bFiled: true,
       taxPaid: true,
-    });
+    }));
   };
 
-  const totalIssued = invoices.length;
-  const filedCount = invoices.filter(i => i.gstr1Filed && i.gstr3bFiled).length;
+  // Filter to seller's own invoices if logged in with GSTIN
+  const myInvoices = user?.gstin ? invoices.filter(i => i.sellerGstin === user.gstin) : invoices;
+  const totalIssued = myInvoices.length;
+  const filedCount = myInvoices.filter(i => i.gstr1Filed && i.gstr3bFiled).length;
   const compliancePct = totalIssued > 0 ? Math.round((filedCount / totalIssued) * 100) : 100;
-  const pendingTax = invoices.filter(i => !i.taxPaid).reduce((sum, i) => sum + i.totalValue, 0);
-  const sellerRecs = reconciliations.filter(r => invoices.some(i => i.sellerGstin === r.sellerGstin));
-  const alerts = sellerRecs.filter(r => r.riskLevel === 'high').length;
+  const pendingTax = myInvoices.filter(i => !i.taxPaid).reduce((sum, i) => sum + i.totalValue, 0);
 
   return (
     <div className="space-y-6">
@@ -85,16 +86,13 @@ export default function SellerPage() {
         </div>
       </div>
 
-      {/* Stats */}
-      <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
         <StatCard title="Invoices Issued" value={totalIssued} icon={FileText} variant="default" />
         <StatCard title="Filing Compliance" value={`${compliancePct}%`} icon={CheckCircle2} variant="success" />
         <StatCard title="Pending Tax" value={`₹${pendingTax.toLocaleString()}`} icon={AlertTriangle} variant={pendingTax > 0 ? 'warning' : 'success'} />
-        <StatCard title="Risk Alerts" value={alerts} icon={AlertTriangle} variant={alerts > 0 ? 'danger' : 'success'} />
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        {/* Form */}
         <Card className="bg-card border-border p-6">
           <h2 className="text-lg font-semibold mb-4 flex items-center gap-2">
             <Plus className="w-4 h-4 text-primary" /> Add Invoice
@@ -160,11 +158,10 @@ export default function SellerPage() {
           </form>
         </Card>
 
-        {/* Invoice Table */}
         <Card className="bg-card border-border p-6 overflow-auto">
           <h2 className="text-lg font-semibold mb-4">Recent Invoices</h2>
-          {invoices.length === 0 ? (
-            <p className="text-muted-foreground text-sm text-center py-10">No invoices yet. Add one to get started.</p>
+          {myInvoices.length === 0 ? (
+            <p className="text-muted-foreground text-sm text-center py-10">No invoices yet.</p>
           ) : (
             <table className="data-table">
               <thead>
@@ -172,21 +169,19 @@ export default function SellerPage() {
                   <th>Invoice</th>
                   <th>Buyer</th>
                   <th>Total</th>
-                  <th>Status</th>
+                  <th>Filing</th>
                 </tr>
               </thead>
               <tbody>
-                {invoices.slice().reverse().map((inv, i) => (
+                {myInvoices.slice().reverse().map((inv, i) => (
                   <motion.tr key={inv.id} initial={{ opacity: 0, x: -10 }} animate={{ opacity: 1, x: 0 }} transition={{ delay: i * 0.05 }}>
                     <td className="text-foreground">{inv.invoiceNumber}</td>
                     <td className="text-xs">{inv.buyerGstin.slice(0, 10)}…</td>
                     <td>₹{inv.totalValue.toLocaleString()}</td>
                     <td>
                       {inv.gstr1Filed && inv.gstr3bFiled && inv.taxPaid
-                        ? <RiskBadge level="low" />
-                        : inv.taxPaid
-                          ? <RiskBadge level="medium" />
-                          : <RiskBadge level="high" />
+                        ? <Badge variant="outline" className="bg-primary/15 text-primary border-primary/30 text-xs">Compliant</Badge>
+                        : <Badge variant="outline" className="bg-warning/15 text-warning border-warning/30 text-xs">Pending</Badge>
                       }
                     </td>
                   </motion.tr>

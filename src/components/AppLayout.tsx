@@ -1,47 +1,48 @@
-import { Link, useLocation } from 'react-router-dom';
+import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { useGST } from '@/context/GSTContext';
-import { UserRole } from '@/types/gst';
+import { useAuth } from '@/context/AuthContext';
 import { cn } from '@/lib/utils';
-import { FileText, ShoppingCart, Shield, BarChart3, Network, ChevronDown } from 'lucide-react';
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuTrigger,
-} from '@/components/ui/dropdown-menu';
+import { FileText, ShoppingCart, Shield, BarChart3, Network, LogOut } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 
-const roleConfig: Record<UserRole, { label: string; icon: React.ReactNode; color: string }> = {
-  seller: { label: 'Seller', icon: <FileText className="w-4 h-4" />, color: 'text-primary' },
-  buyer: { label: 'Buyer', icon: <ShoppingCart className="w-4 h-4" />, color: 'text-accent' },
-  admin: { label: 'Admin', icon: <Shield className="w-4 h-4" />, color: 'text-warning' },
-};
-
-const navItems = [
-  { path: '/', label: 'Dashboard', icon: <BarChart3 className="w-4 h-4" /> },
-  { path: '/seller', label: 'Seller Portal', icon: <FileText className="w-4 h-4" /> },
-  { path: '/buyer', label: 'Buyer Portal', icon: <ShoppingCart className="w-4 h-4" /> },
-  { path: '/graph', label: 'Knowledge Graph', icon: <Network className="w-4 h-4" /> },
-];
-
 export default function AppLayout({ children }: { children: React.ReactNode }) {
-  const { role, setRole, invoices, claims, reconciliations } = useGST();
+  const { invoices, claims, reconciliations } = useGST();
+  const { user, logout } = useAuth();
   const location = useLocation();
-  const currentRole = roleConfig[role];
+  const navigate = useNavigate();
+
+  const role = user?.role || 'admin';
+
+  // Role-based nav filtering
+  const allNavItems = [
+    { path: '/', label: 'Dashboard', icon: <BarChart3 className="w-4 h-4" />, roles: ['admin'] },
+    { path: '/seller', label: 'Seller Portal', icon: <FileText className="w-4 h-4" />, roles: ['seller', 'admin'] },
+    { path: '/buyer', label: 'Buyer Portal', icon: <ShoppingCart className="w-4 h-4" />, roles: ['buyer', 'admin'] },
+    { path: '/graph', label: 'Knowledge Graph', icon: <Network className="w-4 h-4" />, roles: ['admin', 'buyer', 'seller'] },
+  ];
+
+  const navItems = allNavItems.filter(item => item.roles.includes(role));
 
   const highRiskCount = reconciliations.filter(r => r.riskLevel === 'high').length;
 
+  const handleLogout = () => {
+    logout();
+    navigate('/login/admin');
+  };
+
+  const roleLabels = { admin: 'Admin', buyer: 'Buyer', seller: 'Seller' };
+  const roleColors = { admin: 'text-warning', buyer: 'text-accent', seller: 'text-primary' };
+
   return (
     <div className="min-h-screen bg-background">
-      {/* Top Bar */}
       <header className="border-b border-border bg-card/80 backdrop-blur-sm sticky top-0 z-50">
         <div className="max-w-[1600px] mx-auto flex items-center justify-between px-6 h-14">
           <div className="flex items-center gap-8">
-            <Link to="/" className="flex items-center gap-2">
+            <Link to={role === 'admin' ? '/' : `/${role}`} className="flex items-center gap-2">
               <div className="w-8 h-8 rounded-lg bg-primary/20 flex items-center justify-center">
                 <Network className="w-5 h-5 text-primary" />
               </div>
-              <span className="font-bold text-lg tracking-tight">GST Recon</span>
+              <span className="font-bold text-lg tracking-tight">GST Recon AI</span>
             </Link>
             <nav className="flex items-center gap-1">
               {navItems.map(item => (
@@ -63,39 +64,30 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
           </div>
 
           <div className="flex items-center gap-4">
-            {highRiskCount > 0 && (
+            {role === 'admin' && highRiskCount > 0 && (
               <div className="flex items-center gap-2 px-3 py-1 rounded-full bg-destructive/10 text-destructive text-xs font-mono">
-                <span className="w-2 h-2 rounded-full bg-destructive animate-pulse-glow" />
+                <span className="w-2 h-2 rounded-full bg-destructive animate-pulse" />
                 {highRiskCount} High Risk
               </div>
             )}
 
             <div className="text-xs text-muted-foreground font-mono">
-              {invoices.length} INV · {claims.length} ITC · {reconciliations.length} REC
+              {invoices.length} INV · {claims.length} ITC
             </div>
 
-            <DropdownMenu>
-              <DropdownMenuTrigger asChild>
-                <Button variant="outline" size="sm" className="gap-2">
-                  {currentRole.icon}
-                  <span className={currentRole.color}>{currentRole.label}</span>
-                  <ChevronDown className="w-3 h-3" />
-                </Button>
-              </DropdownMenuTrigger>
-              <DropdownMenuContent align="end">
-                {(Object.keys(roleConfig) as UserRole[]).map(r => (
-                  <DropdownMenuItem key={r} onClick={() => setRole(r)} className="gap-2">
-                    {roleConfig[r].icon}
-                    {roleConfig[r].label}
-                  </DropdownMenuItem>
-                ))}
-              </DropdownMenuContent>
-            </DropdownMenu>
+            <div className="flex items-center gap-2">
+              <span className={cn('text-xs font-medium', roleColors[role])}>
+                {roleLabels[role]}
+              </span>
+              {user?.email && <span className="text-xs text-muted-foreground">{user.email}</span>}
+              <Button variant="ghost" size="icon" className="h-8 w-8" onClick={handleLogout}>
+                <LogOut className="w-4 h-4" />
+              </Button>
+            </div>
           </div>
         </div>
       </header>
 
-      {/* Content */}
       <main className="max-w-[1600px] mx-auto px-6 py-6">
         {children}
       </main>

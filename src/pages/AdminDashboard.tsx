@@ -1,11 +1,17 @@
 import { useGST } from '@/context/GSTContext';
+import { useMemo } from 'react';
 import { motion } from 'framer-motion';
-import { BarChart3, Users, FileText, ShieldAlert, AlertTriangle, Network } from 'lucide-react';
+import { BarChart3, Users, FileText, ShieldAlert, AlertTriangle, Brain, Gauge } from 'lucide-react';
 import StatCard from '@/components/StatCard';
 import RiskMeter from '@/components/RiskMeter';
 import RiskBadge from '@/components/RiskBadge';
+import FraudPanel from '@/components/FraudPanel';
+import GraphMLPanel from '@/components/GraphMLPanel';
 import { Card } from '@/components/ui/card';
 import { getVendorRiskLevel } from '@/lib/reconciliation';
+import { runGraphSage } from '@/lib/graphSageSimulator';
+import { runGAT } from '@/lib/gatSimulator';
+import { detectFraud } from '@/lib/fraudDetectionEngine';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, PieChart, Pie, Cell } from 'recharts';
 
 export default function AdminDashboard() {
@@ -13,20 +19,16 @@ export default function AdminDashboard() {
 
   const uniqueBuyers = new Set(claims.map(c => c.buyerGstin)).size;
   const uniqueSellers = new Set(invoices.map(i => i.sellerGstin)).size;
-  const totalITCAtRisk = reconciliations.filter(r => r.riskLevel !== 'low').reduce((s, r) => s + (r.buyerClaim?.itcClaimedAmount || 0), 0);
+  const totalITCClaimed = reconciliations.reduce((s, r) => s + (r.buyerClaim?.itcClaimedAmount || 0), 0);
+  const validITC = reconciliations.filter(r => r.itcStatus === 'VALID').reduce((s, r) => s + (r.buyerClaim?.itcClaimedAmount || 0), 0);
+  const totalITCAtRisk = totalITCClaimed - validITC;
+  const highRiskITC = reconciliations.filter(r => r.riskLevel === 'high').reduce((s, r) => s + (r.buyerClaim?.itcClaimedAmount || 0), 0);
   const avgRisk = reconciliations.length > 0 ? Math.round(reconciliations.reduce((s, r) => s + r.riskScore, 0) / reconciliations.length) : 0;
 
-  // Suspicious sellers
-  const sellerMap = new Map<string, typeof reconciliations>();
-  reconciliations.forEach(r => {
-    const arr = sellerMap.get(r.sellerGstin) || [];
-    arr.push(r);
-    sellerMap.set(r.sellerGstin, arr);
-  });
-
-  const suspiciousSellers = Array.from(sellerMap.entries())
-    .map(([gstin, recs]) => ({ gstin, ...getVendorRiskLevel(recs), count: recs.length }))
-    .filter(s => s.level === 'high');
+  // AI simulation results
+  const graphSageResults = useMemo(() => runGraphSage(reconciliations), [reconciliations]);
+  const gatResults = useMemo(() => runGAT(reconciliations), [reconciliations]);
+  const fraudEntities = useMemo(() => detectFraud(reconciliations, graphSageResults, gatResults), [reconciliations, graphSageResults, gatResults]);
 
   // Charts
   const riskDistribution = [
@@ -49,24 +51,31 @@ export default function AdminDashboard() {
           <BarChart3 className="w-5 h-5 text-warning" />
         </div>
         <div>
-          <h1 className="text-xl font-bold">Admin Dashboard</h1>
-          <p className="text-sm text-muted-foreground">GST reconciliation overview & risk analytics</p>
+          <h1 className="text-xl font-bold">National ITC Risk Engine</h1>
+          <p className="text-sm text-muted-foreground">Government GST Authority — Fraud Detection & Risk Intelligence</p>
         </div>
       </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-5 gap-4">
+      {/* National ITC Stats */}
+      <div className="grid grid-cols-1 md:grid-cols-6 gap-4">
         <StatCard title="Buyers" value={uniqueBuyers} icon={Users} />
         <StatCard title="Sellers" value={uniqueSellers} icon={Users} />
-        <StatCard title="Total Invoices" value={invoices.length} icon={FileText} />
+        <StatCard title="Total ITC Claimed" value={`₹${totalITCClaimed.toLocaleString()}`} icon={FileText} />
+        <StatCard title="Valid ITC" value={`₹${validITC.toLocaleString()}`} icon={FileText} variant="success" />
         <StatCard title="ITC at Risk" value={`₹${totalITCAtRisk.toLocaleString()}`} icon={ShieldAlert} variant={totalITCAtRisk > 0 ? 'danger' : 'success'} />
         <div className="stat-card">
-          <p className="text-xs text-muted-foreground uppercase tracking-wider font-medium mb-3">System Risk</p>
-          <RiskMeter score={avgRisk} size="lg" />
+          <p className="text-xs text-muted-foreground uppercase tracking-wider font-medium mb-1">Fraud Probability</p>
+          <div className="flex items-center gap-2">
+            <Gauge className="w-4 h-4 text-destructive" />
+            <span className="text-2xl font-bold font-mono">{avgRisk}</span>
+            <span className="text-xs text-muted-foreground">/100</span>
+          </div>
+          <RiskMeter score={avgRisk} size="sm" showLabel={false} />
         </div>
       </div>
 
+      {/* Charts Row */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        {/* Risk Distribution */}
         <Card className="bg-card border-border p-6">
           <h2 className="text-sm font-semibold mb-4 uppercase tracking-wider text-muted-foreground">Risk Distribution</h2>
           {reconciliations.length === 0 ? (
@@ -93,7 +102,6 @@ export default function AdminDashboard() {
           </div>
         </Card>
 
-        {/* Root Cause */}
         <Card className="bg-card border-border p-6 col-span-1 lg:col-span-2">
           <h2 className="text-sm font-semibold mb-4 uppercase tracking-wider text-muted-foreground">Root Cause Analysis</h2>
           {rootCauseData.length === 0 ? (
@@ -112,43 +120,60 @@ export default function AdminDashboard() {
         </Card>
       </div>
 
-      {/* Suspicious Sellers */}
-      <Card className="bg-card border-border p-6">
+      {/* Fraud Detection */}
+      <FraudPanel entities={fraudEntities} />
+
+      {/* Graph ML */}
+      <GraphMLPanel graphSageResults={graphSageResults} gatResults={gatResults} />
+
+      {/* ITC Risk Intelligence */}
+      <Card className="bg-card border-border p-6 overflow-auto">
         <h2 className="text-sm font-semibold mb-4 uppercase tracking-wider text-muted-foreground flex items-center gap-2">
-          <AlertTriangle className="w-4 h-4 text-destructive" />
-          Suspicious Sellers ({suspiciousSellers.length})
+          <Brain className="w-4 h-4 text-accent" />
+          ITC Risk Intelligence — High Risk Invoices
         </h2>
-        {suspiciousSellers.length === 0 ? (
-          <p className="text-muted-foreground text-sm text-center py-6">No suspicious sellers detected. Sellers with &gt;50% high-risk invoices will appear here.</p>
+        {reconciliations.filter(r => r.riskLevel === 'high').length === 0 ? (
+          <p className="text-muted-foreground text-sm text-center py-6">No high-risk invoices detected.</p>
         ) : (
           <table className="data-table">
             <thead>
               <tr>
-                <th>Seller GSTIN</th>
-                <th>Invoices</th>
-                <th>High Risk %</th>
-                <th>Status</th>
+                <th>Invoice</th>
+                <th>Seller</th>
+                <th>Buyer</th>
+                <th>ITC Amount</th>
+                <th>Risk Score</th>
+                <th>Root Cause</th>
+                <th>GAT Attention</th>
               </tr>
             </thead>
             <tbody>
-              {suspiciousSellers.map((seller, i) => (
-                <motion.tr key={seller.gstin} initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: i * 0.05 }}>
-                  <td className="font-mono text-foreground">{seller.gstin}</td>
-                  <td>{seller.count}</td>
-                  <td className="text-destructive">{Math.round(seller.percentage)}%</td>
-                  <td><RiskBadge level="high" /></td>
-                </motion.tr>
-              ))}
+              {reconciliations.filter(r => r.riskLevel === 'high').map((rec, i) => {
+                const gat = gatResults.find(g => g.invoiceNumber === rec.invoiceNumber);
+                return (
+                  <motion.tr key={rec.id} initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: i * 0.03 }}>
+                    <td className="text-foreground">{rec.invoiceNumber}</td>
+                    <td className="text-xs">{rec.sellerGstin.slice(0, 10)}…</td>
+                    <td className="text-xs">{rec.buyerGstin.slice(0, 10)}…</td>
+                    <td>₹{(rec.buyerClaim?.itcClaimedAmount || 0).toLocaleString()}</td>
+                    <td><RiskBadge level={rec.riskLevel} /></td>
+                    <td className="text-xs text-muted-foreground max-w-[180px] truncate">{rec.rootCause}</td>
+                    <td className="font-mono text-xs" style={{ color: (gat?.attentionScore || 0) > 0.5 ? 'hsl(0, 72%, 51%)' : 'hsl(38, 92%, 50%)' }}>
+                      {gat?.attentionScore || '—'}
+                    </td>
+                  </motion.tr>
+                );
+              })}
             </tbody>
           </table>
         )}
       </Card>
 
-      {/* All Reconciliation Records */}
+      {/* All Reconciliations */}
       <Card className="bg-card border-border p-6 overflow-auto">
         <h2 className="text-sm font-semibold mb-4 uppercase tracking-wider text-muted-foreground">All Reconciliations</h2>
         {reconciliations.length === 0 ? (
-          <p className="text-muted-foreground text-sm text-center py-6">No reconciliation records. Add invoices and claims to generate records.</p>
+          <p className="text-muted-foreground text-sm text-center py-6">No reconciliation records.</p>
         ) : (
           <table className="data-table">
             <thead>
