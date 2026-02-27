@@ -9,6 +9,9 @@ import RiskBadge from '@/components/RiskBadge';
 import RiskMeter from '@/components/RiskMeter';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
+import { Switch } from '@/components/ui/switch';
+import { Label } from '@/components/ui/label';
+import { useAuth } from '@/context/AuthContext';
 
 // Simple force-graph using SVG instead of external dependency
 function SimpleGraph({ nodes, edges, onNodeClick }: {
@@ -128,14 +131,23 @@ export default function GraphPage() {
   const { invoices, claims, reconciliations } = useGST();
   const [filter, setFilter] = useState('');
   const [selectedRec, setSelectedRec] = useState<string | null>(null);
+  const [highRiskOnly, setHighRiskOnly] = useState(false);
+  const { user } = useAuth();
+  const isAdmin = user?.role === 'admin';
 
   const { nodes, edges } = useMemo(() => {
     const nodeMap = new Map<string, GraphNode>();
     const edgeList: GraphEdge[] = [];
 
-    const filteredInvoices = filter
-      ? invoices.filter(i => i.invoiceNumber.toLowerCase().includes(filter.toLowerCase()))
-      : invoices;
+    const filteredInvoices = invoices.filter(i => {
+      const matchesFilter = !filter || i.invoiceNumber.toLowerCase().includes(filter.toLowerCase());
+      if (!matchesFilter) return false;
+      if (highRiskOnly) {
+        const rec = reconciliations.find(r => r.invoiceNumber === i.invoiceNumber);
+        return rec?.riskLevel === 'high';
+      }
+      return true;
+    });
 
     filteredInvoices.forEach(inv => {
       const rec = reconciliations.find(r => r.invoiceNumber === inv.invoiceNumber);
@@ -181,7 +193,7 @@ export default function GraphPage() {
     });
 
     return { nodes: Array.from(nodeMap.values()), edges: edgeList };
-  }, [invoices, claims, reconciliations, filter]);
+  }, [invoices, claims, reconciliations, filter, highRiskOnly]);
 
   const handleNodeClick = (id: string) => {
     const invNum = id.replace('inv-', '');
@@ -203,12 +215,20 @@ export default function GraphPage() {
             <p className="text-sm text-muted-foreground">Real-time GST transaction network visualization</p>
           </div>
         </div>
-        <Input
-          placeholder="Filter by invoice number…"
-          className="w-64"
-          value={filter}
-          onChange={e => setFilter(e.target.value)}
-        />
+        <div className="flex items-center gap-4">
+          {isAdmin && (
+            <div className="flex items-center gap-2">
+              <Switch id="high-risk" checked={highRiskOnly} onCheckedChange={setHighRiskOnly} />
+              <Label htmlFor="high-risk" className="text-xs text-muted-foreground cursor-pointer">Show High Risk Only</Label>
+            </div>
+          )}
+          <Input
+            placeholder="Filter by invoice number…"
+            className="w-64"
+            value={filter}
+            onChange={e => setFilter(e.target.value)}
+          />
+        </div>
       </div>
 
       <Card className="bg-card border-border p-2 min-h-[500px]">

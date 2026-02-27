@@ -37,6 +37,7 @@ export default function LoginPage() {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [gstin, setGstin] = useState('');
+  const [govId, setGovId] = useState('');
   const [error, setError] = useState('');
 
   const userRole = (role as UserRole) || 'admin';
@@ -91,6 +92,12 @@ export default function LoginPage() {
               <div>
                 <Label className="text-xs">GSTIN</Label>
                 <Input placeholder="22AAAAA0000A1Z5" value={gstin} onChange={e => setGstin(e.target.value)} required />
+              </div>
+            )}
+            {userRole === 'admin' && (
+              <div>
+                <Label className="text-xs">Government ID <span className="text-muted-foreground">(optional)</span></Label>
+                <Input placeholder="GOV-XXXXXX" value={govId} onChange={e => setGovId(e.target.value)} />
               </div>
             )}
             {error && <p className="text-xs text-destructive">{error}</p>}
